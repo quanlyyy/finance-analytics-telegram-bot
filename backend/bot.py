@@ -1,15 +1,20 @@
 import asyncio
+import json
+import time
+import uuid
 from datetime import date
 from pathlib import Path
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, CallbackQuery, FSInputFile
 from .config import BOT_TOKEN, MINI_APP_URL
-from .db import init_db, Session, Transaction, BotReceipt
+from .db import init_db, Session, Transaction, BotReceipt, RecognitionDraft
 from .planning import Goal, Subscription, row_dict
 from .integrations import provider, AIUnavailable
-from sqlalchemy import select
-from .finance import parse_expense, summary
+from sqlalchemy import select, delete
+from .finance import parse_expense, summary, Entry
+from .recognition import preview
+from .ai_routes import context_for
 from .telegram_client import create_bot
 from . import config
 
@@ -27,7 +32,8 @@ async def start(message: Message):
     caption = ('Ваш финансовый помощник.\n\nДобавить расход: кофе 250\nДобавить доход: зарплата 80000\n'
                '/report — отчёт за месяц\n/goals — цели\n/payments — запланированные платежи\n\n'
                'В приложении доступны аналитика, цели, платежи и импорт CSV. Суммы в рублях.\n'
-               'Голос, чеки и ИИ временно отключены до настройки провайдера.')
+               'Пришлите голосовое до 30 секунд или фото чека — предложу операцию для подтверждения.\n'
+               '/ask ваш вопрос — локальный ИИ-помощник. Он может ошибаться; проверяйте суммы.')
     banner_url = f'{MINI_APP_URL.rstrip("/")}/start-banner-ru.jpg'
     banner_path = Path(__file__).resolve().parents[1] / 'frontend' / 'dist' / 'start-banner-ru.jpg'
     photo = FSInputFile(banner_path) if config.BOT_MODE == 'polling' and banner_path.is_file() else banner_url
@@ -49,11 +55,63 @@ async def payments(message: Message):
 
 @dp.message(F.voice)
 async def voice(message: Message):
-    return message.answer('Распознавание голоса пока не подключено. Отправьте расход текстом: кофе 250.')
+    if message.voice.duration > 30:
+        return message.answer('Запишите одно короткое сообщение до 30 секунд: например, «кофе двести рублей».')
+    return await recognize_message(message, 'voice', message.voice)
 
 @dp.message(F.photo)
 async def photo(message: Message):
-    return message.answer('Распознавание чеков пока не подключено. Добавьте сумму вручную.')
+    return await recognize_message(message, 'receipt', message.photo[-1])
+
+async def recognize_message(message, kind, media):
+    if not media.file_size or media.file_size > 6_000_000:
+        return message.answer('Пришлите файл размером до 6 МБ.')
+    await message.answer('Распознаю… Это может занять до двух минут. Запись появится только после подтверждения.')
+    try:
+        content = await message.bot.download(media, timeout=60)
+        try:
+            data = content.read(6_000_001)
+        finally:
+            content.close()
+        result = preview(await provider.recognize(message.from_user.id, kind, data), kind)
+    except AIUnavailable as exc:
+        return message.answer(str(exc))
+    except Exception:
+        return message.answer('Не удалось получить файл. Повторите отправку или добавьте операцию вручную.')
+    entry = result['entry']
+    if entry['amount'] is None:
+        return message.answer('Распознано:\n' + result['text'][:2400] + '\n\nНе удалось однозначно определить сумму. Ничего не сохранено. Отправьте описание и сумму текстом или загрузите файл в разделе «Распознавание» приложения.')
+    token = uuid.uuid4().hex
+    with Session() as session:
+        session.execute(delete(RecognitionDraft).where(RecognitionDraft.expires < int(time.time())))
+        session.add(RecognitionDraft(id=token,user_id=message.from_user.id,payload=json.dumps(entry,ensure_ascii=False),expires=int(time.time())+86400))
+        session.commit()
+    return message.answer(f"Проверьте операцию:\n{entry['note']}\n{entry['amount']/100:,.2f} ₽ · {entry['category']}\nТип: {'доход' if entry['kind']=='income' else 'расход'}\nДата: {entry['date']}\n\nЕсли есть ошибка, отмените и отправьте исправленный текст.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Сохранить',callback_data='recognize:'+token),InlineKeyboardButton(text='Отмена',callback_data='discard:'+token)]]))
+
+@dp.callback_query(F.data.startswith('recognize:') | F.data.startswith('discard:'))
+async def confirm_recognition(callback: CallbackQuery):
+    action, token = callback.data.split(':',1)
+    with Session() as session:
+        payload = session.execute(delete(RecognitionDraft).where(RecognitionDraft.id==token,RecognitionDraft.user_id==callback.from_user.id,RecognitionDraft.expires>=int(time.time())).returning(RecognitionDraft.payload)).scalar_one_or_none()
+        if payload is None:
+            return callback.answer('Черновик уже обработан или истёк.')
+        if action=='recognize':
+            entry = Entry.model_validate_json(payload)
+            session.add(Transaction(user_id=callback.from_user.id,**entry.model_dump()))
+        session.commit()
+    return callback.answer('Операция сохранена' if action=='recognize' else 'Отменено',show_alert=True)
+
+@dp.message(Command('ask','ai'))
+async def ask(message: Message):
+    question = message.text.partition(' ')[2].strip()
+    if not question or len(question)>600:
+        return message.answer('Напишите /ask и вопрос до 600 символов. Например: /ask Как уменьшить расходы?')
+    await message.answer('Готовлю ответ локального ИИ… Это может занять до двух минут.')
+    try:
+        result = await provider.process(message.from_user.id,'chat',question=question,context=context_for(message.from_user.id,date.today().strftime('%Y-%m')))
+        return message.answer(result['answer']+'\n\nЛокальный ИИ может ошибаться. Проверяйте выводы по аналитике.')
+    except AIUnavailable as exc:
+        return message.answer(str(exc))
 
 @dp.message(Command('report'))
 async def report(message: Message):
@@ -94,7 +152,7 @@ async def entry(message: Message):
 
 @dp.message()
 async def unsupported(message: Message):
-    return message.answer('Пока поддерживается текст: например, продукты 1500. Обработка файлов и голоса ещё не подключена.')
+    return message.answer('Пришлите текст «продукты 1500», голосовое до 30 секунд или фото чека. Вопрос помощнику: /ask ваш вопрос.')
 
 async def main():
     if config.BOT_MODE != 'polling':

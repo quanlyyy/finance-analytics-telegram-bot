@@ -6,10 +6,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select, delete
 from .auth import current_user
-from .db import Session, Transaction, Budget, BotReceipt, init_db
+from .db import Session, Transaction, Budget, BotReceipt, RecognitionDraft, init_db
 from .finance import Entry, serialize, summary
 from .planning import router as planning_router, Goal, Subscription, row_dict
 from .webhook import router as webhook_router
+from .ai_routes import router as ai_router
+from .integrations import provider
 
 @asynccontextmanager
 async def lifespan(app):
@@ -19,6 +21,7 @@ async def lifespan(app):
 app = FastAPI(title='Expense Analytics', lifespan=lifespan)
 app.include_router(planning_router)
 app.include_router(webhook_router)
+app.include_router(ai_router)
 
 @app.get('/api/health')
 def health():
@@ -89,8 +92,8 @@ def export_all(user: int = Depends(current_user)):
         return {'transactions':[serialize(r) for r in session.scalars(select(Transaction).where(Transaction.user_id == user))], 'goals':[row_dict(r) for r in session.scalars(select(Goal).where(Goal.user_id == user))], 'subscriptions':[row_dict(r) for r in session.scalars(select(Subscription).where(Subscription.user_id == user))], 'budget':budget.amount if budget else None}
 
 @app.get('/api/capabilities')
-def capabilities(user: int = Depends(current_user)):
-    return {'voice':False,'receipt':False,'ai_chat':False,'csv_import':True}
+async def capabilities(user: int = Depends(current_user)):
+    return await provider.capabilities()
 
 @app.delete('/api/data', status_code=204)
 def erase(user: int = Depends(current_user)):
@@ -100,6 +103,7 @@ def erase(user: int = Depends(current_user)):
         session.execute(delete(Goal).where(Goal.user_id == user))
         session.execute(delete(Subscription).where(Subscription.user_id == user))
         session.execute(delete(BotReceipt).where(BotReceipt.user_id == user))
+        session.execute(delete(RecognitionDraft).where(RecognitionDraft.user_id == user))
         session.commit()
     return Response(status_code=204)
 

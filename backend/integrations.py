@@ -1,20 +1,42 @@
-"""Provider boundary. Paid AI calls are disabled until explicitly configured."""
-from typing import Protocol
+"""Private local inference service; no paid API or user data logging."""
+import base64
+import httpx
+from . import config
 
 class AIUnavailable(RuntimeError):
     pass
 
-class FinanceAI(Protocol):
-    async def transcribe(self, audio:bytes, mime_type:str)->str: ...
-    async def receipt(self, image:bytes, mime_type:str)->dict: ...
-    async def advise(self, question:str, summary:dict)->str: ...
+class LocalAI:
+    async def capabilities(self):
+        empty = dict(voice=False, receipt=False, ai_chat=False, csv_import=True)
+        if not config.AI_WORKER_URL:
+            return empty
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                response = await client.get(config.AI_WORKER_URL + '/health')
+                response.raise_for_status()
+                data = response.json()
+                return {**empty, **{k: data.get(k) is True for k in ('voice','receipt','ai_chat')}}
+        except (httpx.HTTPError, ValueError):
+            return empty
 
-class DisabledAI:
-    async def transcribe(self, audio:bytes, mime_type:str)->str:
-        raise AIUnavailable('Распознавание голоса пока не подключено. Отправьте расход текстом: кофе 250.')
-    async def receipt(self, image:bytes, mime_type:str)->dict:
-        raise AIUnavailable('Распознавание чеков пока не подключено. Добавьте сумму вручную.')
-    async def advise(self, question:str, summary:dict)->str:
-        raise AIUnavailable('ИИ-провайдер пока не настроен. Доступны расчёты и советы по вашим операциям.')
+    async def process(self, user, kind, **kwargs):
+        if not config.AI_WORKER_URL:
+            raise AIUnavailable('Локальный ИИ пока недоступен. Попробуйте позже.')
+        try:
+            async with httpx.AsyncClient(timeout=180) as client:
+                response = await client.post(config.AI_WORKER_URL + '/process', json=dict(user_id=user, kind=kind, **kwargs))
+                if response.status_code in (422,429,503,504):
+                    detail = response.json().get('detail')
+                    raise AIUnavailable(detail if isinstance(detail,str) else 'Не удалось обработать запрос.')
+                response.raise_for_status()
+                return response.json()
+        except (httpx.HTTPError, ValueError):
+            raise AIUnavailable('Сервис занят или недоступен. Повторите через минуту.') from None
 
-provider:FinanceAI=DisabledAI()
+    async def recognize(self, user, kind, data):
+        if not data or len(data) > 6_000_000:
+            raise AIUnavailable('Размер файла должен быть от 1 байта до 6 МБ.')
+        return (await self.process(user, kind, payload=base64.b64encode(data).decode()))['text']
+
+provider = LocalAI()
