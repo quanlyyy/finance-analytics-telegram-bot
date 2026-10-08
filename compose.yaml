@@ -1,0 +1,42 @@
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DEV_AUTH: 'false'
+    volumes:
+      - finance-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  bot:
+    profiles: ["polling"]
+    build: .
+    command: python -m backend.bot
+    env_file: .env
+    environment:
+      DEV_AUTH: 'false'
+    volumes:
+      - finance-data:/app/data
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - '80:80'
+      - '443:443'
+      - '8443:8443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    restart: unless-stopped
+    depends_on:
+      - api
+volumes:
+  finance-data:
+  caddy-data:

@@ -1,0 +1,9 @@
+[Unit]
+Description=Consistent backup of Expense Analytics SQLite database
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/expense-analytics
+ExecStart=/usr/bin/docker compose exec -T api python -m scripts.backup
