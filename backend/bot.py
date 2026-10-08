@@ -18,8 +18,17 @@ dp.message.filter(F.chat.type == 'private')
 @dp.message(Command('start', 'help'))
 @dp.message(F.text.lower().in_({'старт', 'start'}))
 async def start(message: Message):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='Открыть аналитику', web_app=WebAppInfo(url=MINI_APP_URL))], [InlineKeyboardButton(text='Прямая ссылка на приложение', url='https://t.me/finance_analyticsmain_bot/financeapp')], [InlineKeyboardButton(text='Поддержать автора', callback_data='support_author')]]) if MINI_APP_URL.startswith('https://') else None
-    return message.answer('Ваш финансовый помощник.\n\nДобавить расход: кофе 250\nДобавить доход: зарплата 80000\n/report — отчёт за месяц\n/goals — цели\n/payments — запланированные платежи\n\nВ приложении доступны аналитика, цели, платежи и импорт CSV. Суммы в рублях. Голос, чеки и ИИ временно отключены до настройки провайдера.', reply_markup=keyboard)
+    buttons = []
+    if MINI_APP_URL.startswith('https://'):
+        buttons.append([InlineKeyboardButton(text='Открыть аналитику', web_app=WebAppInfo(url=MINI_APP_URL))])
+    buttons.append([InlineKeyboardButton(text='Поддержать автора', callback_data='support_author')])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    caption = ('Ваш финансовый помощник.\n\nДобавить расход: кофе 250\nДобавить доход: зарплата 80000\n'
+               '/report — отчёт за месяц\n/goals — цели\n/payments — запланированные платежи\n\n'
+               'В приложении доступны аналитика, цели, платежи и импорт CSV. Суммы в рублях.\n'
+               'Голос, чеки и ИИ временно отключены до настройки провайдера.')
+    banner_url = f'{MINI_APP_URL.rstrip("/")}/start-banner-ru.jpg'
+    return message.answer_photo(photo=banner_url, caption=caption, reply_markup=keyboard)
 
 @dp.message(Command('goals'))
 async def goals(message: Message):
