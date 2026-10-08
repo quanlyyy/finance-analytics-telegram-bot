@@ -1,8 +1,9 @@
 import asyncio
 from datetime import date
+from pathlib import Path
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, CallbackQuery
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, CallbackQuery, FSInputFile
 from .config import BOT_TOKEN, MINI_APP_URL
 from .db import init_db, Session, Transaction, BotReceipt
 from .planning import Goal, Subscription, row_dict
@@ -28,7 +29,9 @@ async def start(message: Message):
                'В приложении доступны аналитика, цели, платежи и импорт CSV. Суммы в рублях.\n'
                'Голос, чеки и ИИ временно отключены до настройки провайдера.')
     banner_url = f'{MINI_APP_URL.rstrip("/")}/start-banner-ru.jpg'
-    return message.answer_photo(photo=banner_url, caption=caption, reply_markup=keyboard)
+    banner_path = Path(__file__).resolve().parents[1] / 'frontend' / 'dist' / 'start-banner-ru.jpg'
+    photo = FSInputFile(banner_path) if config.BOT_MODE == 'polling' and banner_path.is_file() else banner_url
+    return message.answer_photo(photo=photo, caption=caption, reply_markup=keyboard)
 
 @dp.message(Command('goals'))
 async def goals(message: Message):
