@@ -32,12 +32,5 @@ class BotReceipt(Base):
     message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     transaction_id: Mapped[int] = mapped_column(BigInteger)
 
-class RecognitionDraft(Base):
-    __tablename__ = 'recognition_drafts'
-    id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    payload: Mapped[str] = mapped_column(String(4000))
-    expires: Mapped[int] = mapped_column(BigInteger)
-
 def init_db():
     Base.metadata.create_all(engine)

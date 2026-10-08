@@ -7,4 +7,3 @@ frontend/dist
 __pycache__
 *.png
 .deploy
-output/

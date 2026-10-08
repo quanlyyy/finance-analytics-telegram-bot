@@ -11,7 +11,7 @@ async def main():
     try:
         async with create_bot() as bot:
             await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text='Мои финансы',web_app=WebAppInfo(url=MINI_APP_URL)))
-            await bot.set_my_commands([BotCommand(command='start',description='Открыть финансового помощника'),BotCommand(command='report',description='Отчёт за месяц'),BotCommand(command='goals',description='Цели накоплений'),BotCommand(command='payments',description='Запланированные платежи'),BotCommand(command='ask',description='Задать вопрос локальному ИИ'),BotCommand(command='help',description='Как пользоваться')])
+            await bot.set_my_commands([BotCommand(command='start',description='Открыть финансового помощника'),BotCommand(command='report',description='Отчёт за месяц'),BotCommand(command='goals',description='Цели накоплений'),BotCommand(command='payments',description='Запланированные платежи'),BotCommand(command='help',description='Как пользоваться')])
             menu=await bot.get_chat_menu_button()
             print('Telegram menu configured:',menu.type)
             if WEBHOOK_SECRET and BOT_MODE == 'webhook':

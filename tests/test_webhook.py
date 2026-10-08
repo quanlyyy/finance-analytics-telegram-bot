@@ -16,8 +16,6 @@ def client(monkeypatch):
     monkeypatch.setattr(api,'Session',sessions);monkeypatch.setattr(bot,'Session',sessions)
     monkeypatch.setattr(api,'init_db',lambda:None)
     monkeypatch.setattr(config,'WEBHOOK_SECRET','test-webhook-secret')
-    monkeypatch.setattr(config,'BOT_MODE','webhook')
-    monkeypatch.setattr(bot,'MINI_APP_URL','https://example.com')
     monkeypatch.setattr(config,'BOT_TOKEN','123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789')
     with TestClient(api.app) as c:yield c,sessions
     engine.dispose()
@@ -51,8 +49,7 @@ def test_start_reply(client,text):
     response=c.post('/api/telegram/webhook',json=event(text),headers={'X-Telegram-Bot-Api-Secret-Token':'test-webhook-secret'})
     assert response.status_code==200
     data=response.json()
-    assert data['method']=='sendPhoto'
-    assert 'Ваш финансовый помощник' in data['caption']
-    assert data['reply_markup']['inline_keyboard'][1][0]['callback_data']=='support_author'
-    assert data['reply_markup']['inline_keyboard'][0][0]['web_app']['url']=='https://example.com'
+    assert data['method']=='sendMessage'
+    assert 'Ваш финансовый помощник' in data['text']
+    assert data['reply_markup']['inline_keyboard'][1][0]['url']=='https://t.me/finance_analyticsmain_bot/financeapp'
     with sessions() as session:assert not session.scalars(select(Transaction)).all()
