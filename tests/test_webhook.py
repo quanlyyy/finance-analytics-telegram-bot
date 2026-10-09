@@ -49,7 +49,7 @@ def test_start_reply(client,text):
     response=c.post('/api/telegram/webhook',json=event(text),headers={'X-Telegram-Bot-Api-Secret-Token':'test-webhook-secret'})
     assert response.status_code==200
     data=response.json()
-    assert data['method']=='sendMessage'
-    assert 'Ваш финансовый помощник' in data['text']
-    assert data['reply_markup']['inline_keyboard'][1][0]['url']=='https://t.me/finance_analyticsmain_bot/financeapp'
+    assert data['method']=='sendPhoto'
+    assert 'Ваш финансовый помощник' in data['caption']
+    assert data['reply_markup']['inline_keyboard'][-1][0]['callback_data']=='support_author'
     with sessions() as session:assert not session.scalars(select(Transaction)).all()

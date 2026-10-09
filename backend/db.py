@@ -1,6 +1,6 @@
 from pathlib import Path
-from datetime import date
-from sqlalchemy import BigInteger, Integer, String, Date, create_engine
+from datetime import date, datetime, timezone
+from sqlalchemy import BigInteger, Integer, String, Date, DateTime, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from .config import DATABASE_URL
 
@@ -31,6 +31,15 @@ class BotReceipt(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     transaction_id: Mapped[int] = mapped_column(BigInteger)
+
+class Donation(Base):
+    __tablename__ = 'donations'
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    stars: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default='pending')
+    charge_id: Mapped[str | None] = mapped_column(String(256), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 def init_db():
     Base.metadata.create_all(engine)

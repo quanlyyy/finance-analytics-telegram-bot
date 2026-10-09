@@ -11,11 +11,11 @@ async def main():
     try:
         async with create_bot() as bot:
             await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(text='Мои финансы',web_app=WebAppInfo(url=MINI_APP_URL)))
-            await bot.set_my_commands([BotCommand(command='start',description='Открыть финансового помощника'),BotCommand(command='report',description='Отчёт за месяц'),BotCommand(command='goals',description='Цели накоплений'),BotCommand(command='payments',description='Запланированные платежи'),BotCommand(command='help',description='Как пользоваться')])
+            await bot.set_my_commands([BotCommand(command='start',description='Открыть финансового помощника'),BotCommand(command='report',description='Отчёт за месяц'),BotCommand(command='goals',description='Цели накоплений'),BotCommand(command='payments',description='Запланированные платежи'),BotCommand(command='donate',description='Поддержать автора'),BotCommand(command='paysupport',description='Обратиться по вопросам платежей'),BotCommand(command='help',description='Как пользоваться')])
             menu=await bot.get_chat_menu_button()
             print('Telegram menu configured:',menu.type)
             if WEBHOOK_SECRET and BOT_MODE == 'webhook':
-                await bot.set_webhook(url=WEBHOOK_URL,secret_token=WEBHOOK_SECRET,allowed_updates=['message','callback_query'],max_connections=1,drop_pending_updates=False)
+                await bot.set_webhook(url=WEBHOOK_URL,secret_token=WEBHOOK_SECRET,allowed_updates=['message','callback_query','pre_checkout_query'],max_connections=1,drop_pending_updates=False)
                 info=await bot.get_webhook_info()
                 print('Webhook configured:',info.url,'pending:',info.pending_update_count)
     except Exception as error:

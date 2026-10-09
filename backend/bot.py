@@ -12,6 +12,7 @@ from sqlalchemy import select
 from .finance import parse_expense, summary
 from .telegram_client import create_bot
 from . import config
+from . import donations
 
 dp = Dispatcher()
 dp.message.filter(F.chat.type == 'private')
@@ -70,9 +71,14 @@ async def undo(callback: CallbackQuery):
             session.commit()
     return callback.answer('Операция отменена')
 
-@dp.callback_query(F.data == 'support_author')
-async def support_author(callback: CallbackQuery):
-    return callback.answer()
+dp.message.register(donations.donate_command, Command('donate'))
+dp.message.register(donations.pay_support, Command('paysupport'))
+dp.message.register(donations.successful_payment, F.successful_payment)
+dp.message.register(donations.refunded_payment, F.refunded_payment)
+dp.callback_query.register(donations.support_author, F.data == 'support_author')
+dp.callback_query.register(donations.donate_stars, F.data.startswith('donate_stars:'))
+dp.callback_query.register(donations.legacy_payment_support, F.data.startswith('refund_donation:'))
+dp.pre_checkout_query.register(donations.pre_checkout)
 
 @dp.message(F.text)
 async def entry(message: Message):
