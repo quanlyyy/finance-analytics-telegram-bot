@@ -73,11 +73,13 @@ async def undo(callback: CallbackQuery):
 
 dp.message.register(donations.donate_command, Command('donate'))
 dp.message.register(donations.pay_support, Command('paysupport'))
+dp.message.register(donations.pay_support, Command('donations'))
 dp.message.register(donations.successful_payment, F.successful_payment)
 dp.message.register(donations.refunded_payment, F.refunded_payment)
 dp.callback_query.register(donations.support_author, F.data == 'support_author')
 dp.callback_query.register(donations.donate_stars, F.data.startswith('donate_stars:'))
 dp.callback_query.register(donations.legacy_payment_support, F.data.startswith('refund_donation:'))
+dp.callback_query.register(donations.donation_history, F.data.startswith('donation_history:'))
 dp.pre_checkout_query.register(donations.pre_checkout)
 
 @dp.message(F.text)

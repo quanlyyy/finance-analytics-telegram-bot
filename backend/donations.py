@@ -6,7 +6,6 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy import select
 
 from .db import Donation, Session
-from . import config
 
 DONATEPAY_URL = 'https://donatepay.ru/don/1537607'
 STAR_AMOUNTS = (25, 50, 100, 250, 500)
@@ -19,6 +18,7 @@ def support_keyboard():
         [InlineKeyboardButton(text='💙 Поддержать через DonatePay', url=DONATEPAY_URL)],
         [InlineKeyboardButton(text=f'⭐ {amount}', callback_data=f'donate_stars:{amount}') for amount in STAR_AMOUNTS[:3]],
         [InlineKeyboardButton(text=f'⭐ {amount}', callback_data=f'donate_stars:{amount}') for amount in STAR_AMOUNTS[3:]],
+        [InlineKeyboardButton(text='📋 История донатов', callback_data='donation_history:0')],
     ])
 
 
@@ -29,7 +29,7 @@ def support_text():
             'Это добровольная поддержка: она не открывает дополнительные функции. '
             'Перед оплатой Telegram покажет сумму и попросит подтверждение.\n\n'
             f'Своя сумма: /donate 150 (от 1 до {MAX_STARS} ⭐).\n'
-            'Вопросы по платежам: /paysupport.')
+            'История донатов: /donations.')
 
 
 def invoice(user_id: int, amount: int):
@@ -40,7 +40,7 @@ def invoice(user_id: int, amount: int):
     return SendInvoice(
         chat_id=user_id,
         title='Поддержка автора',
-        description='Добровольная поддержка развития финансового помощника. Дополнительные функции не предоставляются. Вопросы по платежу: /paysupport.',
+        description='Добровольный донат на развитие финансового помощника. Дополнительные функции не предоставляются. История донатов: /donations.',
         payload=PREFIX + donation_id,
         currency='XTR',
         prices=[LabeledPrice(label='Поддержка автора', amount=amount)],
@@ -90,50 +90,61 @@ async def successful_payment(message: Message):
     with Session() as session:
         row = session.get(Donation, payment.invoice_payload[len(PREFIX):]) if payment.invoice_payload.startswith(PREFIX) else None
         if not matches(row, message.from_user.id, payment.currency, payment.total_amount):
-            return message.answer('Получено уведомление о платеже, но его данные не совпали со счётом. Помощь: /paysupport.')
+            return message.answer('Получено уведомление о платеже, но его данные не совпали со счётом. Проверьте квитанцию Telegram и историю: /donations.')
         if row.status in ('paid', 'refunded'):
-            return message.answer('Этот платёж уже обработан. История и обращение в поддержку: /paysupport.')
+            return message.answer('Этот платёж уже обработан. История донатов: /donations.')
         row.charge_id = payment.telegram_payment_charge_id
         row.status = 'paid'
         session.commit()
-    return message.answer(f'Спасибо за поддержку! 💙 Получено {payment.total_amount} ⭐.\nВопросы по платежу: /paysupport.')
+    return message.answer(f'Спасибо за донат! 💙 Получено {payment.total_amount} ⭐.\nИстория донатов: /donations.')
 
 
-def payment_support_response(user_id: int):
+def donation_history_response(user_id: int, offset: int = 0):
     with Session() as session:
         rows = session.scalars(select(Donation).where(
             Donation.user_id == user_id, Donation.status.in_(('paid', 'refunded'))
-        ).order_by(Donation.created_at.desc()).limit(10)).all()
+        ).order_by(Donation.created_at.desc(), Donation.id.desc()).offset(offset).limit(11)).all()
         history = '\n\n'.join(
             f'{row.created_at:%d.%m.%Y} · {row.stars} ⭐ · '
             f'{"возвращён" if row.status == "refunded" else "оплачен"}\nНомер платежа: {row.id}'
-            for row in rows
+            for row in rows[:10]
         )
     buttons = []
-    if config.PAYMENT_SUPPORT_URL:
-        buttons.append([InlineKeyboardButton(text='✉️ Связаться с поддержкой', url=config.PAYMENT_SUPPORT_URL)])
+    navigation = []
+    if offset:
+        navigation.append(InlineKeyboardButton(text='← Назад', callback_data=f'donation_history:{max(0, offset - 10)}'))
+    if len(rows) > 10:
+        navigation.append(InlineKeyboardButton(text='Далее →', callback_data=f'donation_history:{offset + 10}'))
+    if navigation:
+        buttons.append(navigation)
+    buttons.append([InlineKeyboardButton(text='💙 Сделать донат', callback_data='support_author')])
     buttons.append([InlineKeyboardButton(text='Открыть DonatePay', url=DONATEPAY_URL)])
     return SendMessage(
         chat_id=user_id,
-        text=('💙 Поддержка по платежам\n\n'
-              'Если возникла проблема с донатом, напишите нам. '
-              'Укажите номер платежа, дату, сумму и причину обращения. Можно приложить квитанцию Telegram.\n\n'
-              'Рассмотрим ваше обращение и поможем разобраться с платежом.\n\n'
-              + ('Контакт поддержки пока не настроен. Попробуйте позже.\n\n' if not config.PAYMENT_SUPPORT_URL else '')
-              + ('Ваши последние платежи:\n\n' + history if history else 'Подтверждённых платежей в звёздах пока нет. Если звёзды списались, приложите квитанцию к обращению.')
-              + '\n\nПо платежам DonatePay можно также обратиться через страницу DonatePay.'),
+        text=('📋 История донатов\n\n'
+              + (history if history else 'На этой странице подтверждённых донатов в звёздах нет.')
+              + '\n\nЗдесь учитываются донаты в Telegram Stars. Операции DonatePay доступны на стороне DonatePay.'),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
 
 
 async def pay_support(message: Message):
-    return payment_support_response(message.from_user.id)
+    # Compatibility with the previous command; only shows the payment history.
+    return donation_history_response(message.from_user.id)
+
+
+async def donation_history(callback: CallbackQuery):
+    raw = (callback.data or '').removeprefix('donation_history:')
+    if not raw.isdigit() or not 0 <= int(raw) <= 1000000:
+        return await callback.answer('Откройте историю через /donations.', show_alert=True)
+    await callback.answer()
+    return donation_history_response(callback.from_user.id, int(raw))
 
 
 async def legacy_payment_support(callback: CallbackQuery):
     # Old messages still contain refund buttons. They must not trigger a refund.
     await callback.answer()
-    return payment_support_response(callback.from_user.id)
+    return donation_history_response(callback.from_user.id)
 
 
 async def refunded_payment(message: Message):
@@ -143,4 +154,4 @@ async def refunded_payment(message: Message):
         if matches(row, message.from_user.id, payment.currency, payment.total_amount):
             row.status = 'refunded'
             session.commit()
-    return message.answer('Telegram подтвердил возврат звёзд. История: /paysupport.')
+    return message.answer('Telegram обновил статус платежа. История: /donations.')

@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from backend import donations, config
+from backend import donations
 from backend.bot import dp
 from backend.db import Base, Donation, Transaction
 
@@ -107,8 +107,7 @@ def test_mismatched_success_does_not_mark_paid(sessions):
 
 
 @pytest.mark.parametrize('user',[123,456])
-def test_old_refund_buttons_only_open_support(sessions,monkeypatch,user):
-    monkeypatch.setattr(config, 'PAYMENT_SUPPORT_URL', 'https://t.me/example_support')
+def test_old_refund_buttons_only_open_history(sessions,user):
     with sessions() as session:
         session.add(Donation(id='order',user_id=123,stars=50,status='paid',charge_id='charge-123'))
         session.commit()
@@ -118,24 +117,37 @@ def test_old_refund_buttons_only_open_support(sessions,monkeypatch,user):
     result = run(donations.legacy_payment_support(callback.as_(fake_bot)))
     fake_bot.refund_star_payment.assert_not_called()
     assert result.chat_id == user
-    assert result.reply_markup.inline_keyboard[0][0].url == 'https://t.me/example_support'
+    assert 'История донатов' in result.text
     with sessions() as session:
         assert session.get(Donation,'order').status == 'paid'
 
 
-def test_payment_support_shows_only_own_receipts_and_contact(sessions,monkeypatch):
-    monkeypatch.setattr(config, 'PAYMENT_SUPPORT_URL', 'https://t.me/example_support')
+def test_history_shows_only_own_receipts_without_support(sessions):
     with sessions() as session:
         session.add_all([Donation(id='own-order',user_id=123,stars=50,status='paid',charge_id='own-charge'),
                          Donation(id='other-order',user_id=456,stars=500,status='paid',charge_id='other-charge')])
         session.commit()
-    result = run(donations.pay_support(message('/paysupport')))
+    result = run(donations.pay_support(message('/donations')))
     assert 'own-order' in result.text and 'other-order' not in result.text
     assert 'own-charge' not in result.text
-    assert 'поможем разобраться с платежом' in result.text
+    assert 'История донатов' in result.text
     assert 'возврат' not in result.text.lower()
-    assert result.reply_markup.inline_keyboard[0][0].url == 'https://t.me/example_support'
-    assert all(button.callback_data is None for row in result.reply_markup.inline_keyboard for button in row)
+    assert 'напишите нам' not in result.text.lower()
+    assert all(button.url in (None, donations.DONATEPAY_URL) for row in result.reply_markup.inline_keyboard for button in row)
+
+
+def test_history_pagination_preserves_user_isolation(sessions):
+    with sessions() as session:
+        session.add_all([Donation(id=f'own-{i:02}',user_id=123,stars=50,status='paid') for i in range(12)])
+        session.add(Donation(id='other-user',user_id=456,stars=500,status='paid'))
+        session.commit()
+    first = donations.donation_history_response(123)
+    second = donations.donation_history_response(123, 10)
+    assert first.text.count('Номер платежа:') == 10
+    assert second.text.count('Номер платежа:') == 2
+    assert first.reply_markup.inline_keyboard[0][0].callback_data == 'donation_history:10'
+    assert second.reply_markup.inline_keyboard[0][0].callback_data == 'donation_history:0'
+    assert 'other-user' not in first.text + second.text
 
 
 def test_callback_invoice_is_bound_to_clicking_user(sessions):
